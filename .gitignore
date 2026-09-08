@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
+
+# 渲染输出 / 中间产物（不入库）
+pose/renders/
+render_out/
+/tmp/
+*.png
+
+# 游戏资产（体积大且版权不属于本工程，切勿提交）
+HoneySelect/
+*.fbx
+*.tar.gz
