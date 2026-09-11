@@ -64,6 +64,8 @@ SKIN_GROUP = ["body", "top", "bot", "shoe"]   # rebind + FIX(含 body 同步)
 HEAD_GROUP = ["head", "hair_f", "hair_b"]     # 对象级刚体跟随头骨
 M_fix = Matrix.Rotation(math.pi, 4, 'X')
 R_up = Matrix.Rotation(math.pi / 2, 4, 'X')
+# 骨架管栏最终取景系(collect 末步): 骨盆居中系(前轴朝 -y) → 相机系
+R_SHOW = Matrix.Rotation(math.pi / 2, 4, 'X')
 S01 = Matrix.Scale(0.01, 4)
 FIX = Matrix.Rotation(-math.pi / 2, 4, 'X') @ S01
 # head/hair 部件装配(修正): 部件原装网格因自带负 scale 呈"脸 -Z/顶 -Y"倒姿,
@@ -139,34 +141,46 @@ arm.matrix_world = M_fix @ arm.matrix_world
 bpy.context.view_layer.update()
 sys.path.insert(0, _ROOT)
 sys.path.insert(0, _HERE)
-from kp_retarget import kp_drive
+from kp_retarget import kp_drive, _detect_src_variant, SRC_VARIANTS
 from character import ShapeData, apply_morph, reset_pose, CAT_ZH
 bvh_arm = None
 if args.rest:
     print("[MODE] rest: 仅 HS2 rest 骨架+模型, 不导入 BVH 不模仿")
 else:
     act, n, bvh_arm = kp_drive(args.bvh, arm)
+# AMASS 等命名变体: 骨架管 schema(PTS/CHAINS)与骨盆参考骨按变体别名翻译
+BVH_HIP = "hip"
+_alias = {}
+if bvh_arm is not None:
+    _alias = SRC_VARIANTS[_detect_src_variant(bvh_arm)].get("viz", {})
+    if _alias:
+        PTS = [(_alias.get(b, b), h) for b, h in PTS]
+        CHAINS = [[_alias.get(n, n) for n in ch] for ch in CHAINS]
+    BVH_HIP = _alias.get("hip", "hip")
 for pb in arm.pose.bones:
     pb.matrix_basis.identity()
 bpy.context.view_layer.update()
 
 # ---- 捏人数据加载 ----
-shape_sliders = {"face": {}, "body": {}}
+# 中性渲染(无 --shape-json)不加载捏人数据表: 表是外部游戏资产, 隔离包内
+# 无默认路径(曾因默认 data-dir 指向 myhs2 内不存在路径 → ShapeData 静默
+# 崩在 kp_drive 之后、无 [MORPH] 输出且 exit=0, 排障极难)
+morph_deltas = {"face": {}, "body": {}}
 if args.shape_json:
+    if not os.path.isdir(args.data_dir or ""):
+        raise SystemExit(f"[trio] --shape-json 需要 --data-dir 指向游戏 Data 目录, 现: {args.data_dir}")
     with open(args.shape_json, encoding="utf-8") as f:
         raw = json.load(f)
     shape_sliders = {sec: {int(k): v for k, v in raw.get(sec, {}).items()} for sec in ("face", "body")}
-
-morph_deltas = {}
-for sec in ("face", "body"):
-    sd = ShapeData(args.data_dir, sec)
-    deltas, missing = sd.evaluate(shape_sliders[sec])
-    morph_deltas[sec] = deltas
-    print(f"[MORPH] {sec}: sliders={shape_sliders[sec]} -> {len(deltas)} bones"
-          + (f", missing={missing}" if missing else ""))
-    for cid in sorted(shape_sliders[sec]):
-        zh = CAT_ZH[sec].get(cid, "?")
-        print(f"    cat {cid} {zh}: slider={shape_sliders[sec][cid]}")
+    for sec in ("face", "body"):
+        sd = ShapeData(args.data_dir, sec)
+        deltas, missing = sd.evaluate(shape_sliders[sec])
+        morph_deltas[sec] = deltas
+        print(f"[MORPH] {sec}: sliders={shape_sliders[sec]} -> {len(deltas)} bones"
+              + (f", missing={missing}" if missing else ""))
+        for cid in sorted(shape_sliders[sec]):
+            zh = CAT_ZH[sec].get(cid, "?")
+            print(f"    cat {cid} {zh}: slider={shape_sliders[sec][cid]}")
 
 # rebind 组(top/bot/shoe) → arm; 部件骨架隐藏
 for p in SKIN_GROUP:
@@ -183,11 +197,31 @@ for p in SKIN_GROUP:
 arm.matrix_world = T_MODEL @ R_up @ arm.matrix_world
 if bvh_arm is not None:
     bvh_arm.matrix_world = R_up @ bvh_arm.matrix_world
+# 模型栏朝向归一：管栏在 collect() 里减髋中点 → 逆旋 f1 骨盆 → 末步 R_SHOW，
+# 即骨架栏最终取景 = R_SHOW @ q_f1⁻¹ @ (p-髋)。模型留在世界系就带上源 f1 转身
+# (实测 jogstop/cartwheel f1 骨盆前向 yaw ≈ ±90°) → 右栏侧身、骨架栏正面。
+# 给模型左乘同一个 M = R_SHOW @ q_f1⁻¹ 后：
+#   · 模型 f1 体轴朝向 = R_SHOW @ v，与骨架栏逐轴一致（只乘 q_f1⁻¹ 会把角色
+#     上轴转到 +y，模型在取景系里躺倒——实测已踩）；
+#   · collect 预热到的 HS2 骨盆逆旋变成 R_SHOW⁻¹，与末步 R_SHOW 相消
+#     → 骨架管栏像素级不变；
+#   · 蒙皮相对矩阵 arm⁻¹@mesh=FIX 不变 → 姿势形不变，只是整体刚性转一记。
+_ARM_W_PRE = arm.matrix_world.copy()      # 归一前矩阵, 供 K 量跨栏垂直跨度
+scene.frame_set(1)                        # 量 f1 已解算骨盆姿态需要动作求值
+bpy.context.view_layer.update()
+q_f1_hips = (arm.matrix_world @ arm.pose.bones["cf_J_Hips"].matrix).to_quaternion().normalized()
+arm.matrix_world = (R_SHOW @ q_f1_hips.inverted().to_matrix().to_4x4()) @ arm.matrix_world
+bpy.context.view_layer.update()
+_front = q_f1_hips @ Vector((0, 0, 1))    # HS2 骨盆局部 +Z = 角色前向
+print(f"[FACE] 模型归一 M=R_SHOW@q_f1⁻¹, 归一前 f1 前向 yaw="
+      f"{math.degrees(math.atan2(_front.x, -_front.y)):.1f}°")
 # A/B 调试: HS2_YAW=180 → 模型侧(arm/蒙皮)整体绕世界 Z 再转 180°, 用于
-# 与默认版对照 "模型前后朝向" 哪个对(红骨架骨盆居中系对此免疫, 不受影响)
+# 与默认版对照 "模型前后朝向" 哪个对。必须排在上面的朝向归一之后, 否则该 180°
+# 会被 q_f1 一并旋掉而失效(红骨架骨盆居中系对此免疫, 不受影响)。
 if os.environ.get("HS2_YAW"):
     yaw = math.radians(float(os.environ["HS2_YAW"]))
     arm.matrix_world = Matrix.Rotation(yaw, 4, 'Z') @ arm.matrix_world
+    bpy.context.view_layer.update()
 HEAD_BONE = "cf_J_Head_s"
 B_ref = arm.matrix_world @ arm.pose.bones[HEAD_BONE].bone.matrix_local
 # head/hair 装配基准(rest): 快照原装矩阵, mesh 解除 parent(否则对象矩阵赋值与
@@ -234,15 +268,16 @@ def _origin_mid(arm_obj, pair):
             ps.append((arm_obj.matrix_world @ pb.matrix).to_translation())
     return sum(ps, Vector()) / len(ps) if ps else Vector()
 
-R_SHOW = Matrix.Rotation(math.pi / 2, 4, 'X')
-ORIGIN_BVH = ["lThigh", "rThigh"]
+ORIGIN_BVH = [_alias.get(n, n) for n in ("lThigh", "rThigh")]
 ORIGIN_HS2 = ["cf_J_LegUp00_L", "cf_J_LegUp00_R"]
 BVH_X = -1.9
 
 # 骨盆逆旋固定基准(f1)：旧版 collect 每帧用当前骨盆旋转逆旋——红骨架被
 # 归一到“永远面朝镜头”，而模型栏是世界系(跟随骨盆转身，如 f450 转 146°)
 # → 两栏姿势朝向不一致。改为首帧(预热时)缓存骨盆逆旋、之后固定不变：
-# 保留每帧世界转身朝向(与模型一致)，首帧归零保证绿/红两栏仍可比。
+# 保留每帧世界转身朝向。HS2 侧的这份 f1 逆旋现另存一步左乘进了 arm 对象矩阵
+# (见上方 [FACE] 模型栏朝向归一) → 这里预热缓存到的 HS2 基准即单位阵，
+# 红骨架不变、模型随之转正，三栏共享同一“f1 朝向 = 正面”的基准。
 _F1_HIPROT = {}
 
 def collect(arm_obj, rot_bone, origin_pair, scale=1.0, side=""):
@@ -272,7 +307,7 @@ scene.frame_set(1)
 bpy.context.view_layer.update()
 if bvh_arm is not None:
     zb = [bvh_arm.matrix_world @ pb.matrix for pb in bvh_arm.pose.bones]
-    zh = [arm.matrix_world @ pb.matrix for pb in arm.pose.bones]
+    zh = [_ARM_W_PRE @ pb.matrix for pb in arm.pose.bones]
     K = (max(v.to_translation().z for v in zh) - min(v.to_translation().z for v in zh)) / \
         (max(v.to_translation().z for v in zb) - min(v.to_translation().z for v in zb))
     print(f"[K] {K:.5f}")
@@ -281,7 +316,7 @@ else:
 # f1 骨盆基准逆旋预热(当前已 frame_set(1))：首帧调用各 collect 一次缓存
 # 基准，之后帧循环不再重算（rest 模式同样适用——无动画 f1==rest）
 if bvh_arm is not None:
-    collect(bvh_arm, "hip", ORIGIN_BVH, scale=K, side="bvh")
+    collect(bvh_arm, BVH_HIP, ORIGIN_BVH, scale=K, side="bvh")
 collect(arm, "cf_J_Hips", ORIGIN_HS2, side="hs2")
 
 # ============ 3. 骨架管 mesh(绿=源BVH / 红=HS2), 固定拓扑+逐帧改顶点 ============
@@ -443,7 +478,7 @@ for f in FRAMES:
         for m, m0 in zip(meshes[p], W0_mesh[p]):
             m.matrix_world = Hc @ m0
     if bvh_arm is not None:
-        pts_b = collect(bvh_arm, "hip", ORIGIN_BVH, scale=K, side="bvh")
+        pts_b = collect(bvh_arm, BVH_HIP, ORIGIN_BVH, scale=K, side="bvh")
         tube_update(mesh_g, pts_b)
     pts_h = collect(arm, "cf_J_Hips", ORIGIN_HS2, side="hs2")
     tube_update(mesh_r, pts_h)

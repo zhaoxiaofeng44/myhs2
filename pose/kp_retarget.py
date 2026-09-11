@@ -43,9 +43,8 @@ LEG = {"L": ["cf_J_LegUp00_L", "cf_J_LegLow01_L", "cf_J_Foot01_L"],
 ARM = {"L": ["cf_J_ArmUp00_L", "cf_J_ArmLow01_L", "cf_J_Hand_L"],
        "R": ["cf_J_ArmUp00_R", "cf_J_ArmLow01_R", "cf_J_Hand_R"]}
 # 锁骨：HS2 cf_J_Shoulder_L/R（ArmUp00 父链，携 512/520 顶点肩部蒙皮）
-# ←→ 源 rCollar/lCollar。层级：Spine03 → ShoulderIK → Shoulder → ArmUp00。
-SHOULDER = {"L": ("cf_J_Shoulder_L", "lCollar"),
-            "R": ("cf_J_Shoulder_R", "rCollar")}
+# 层级：Spine03 → ShoulderIK → Shoulder → ArmUp00。源骨名见 SRC_VARIANTS。
+SHOULDER_HS2 = {"L": "cf_J_Shoulder_L", "R": "cf_J_Shoulder_R"}
 # 趾骨平放补偿：HS2 靴鞋底前 1/4 段 rocker 上翘曲线 11.7mm（鞋头顶点挂
 # 未驱动 Toes01 蒙皮，鞋头段权重 116 vs Foot02 仅 4），源 BVH 无趾骨
 # （脚为末端骨）→ Toes01 恒 rest → 站姿(f1)鞋尖明显翘起。常量下压补偿
@@ -71,18 +70,122 @@ FINGERS = {
           ("cf_J_Hand_Little01_R", "cf_J_Hand_Little02_R", "rPinky1", "rPinky2"),
           ("cf_J_Hand_Thumb01_R", "cf_J_Hand_Thumb02_R", "rThumb1", "rThumb2")],
 }
-# 源侧对应名（无 L/R 后缀的骨盆/脊柱骨）
-SRC_HIPMID = ["lThigh", "rThigh"]
-SRC_ABD = "abdomen"
-SRC_SPINE_PTS = ["abdomen", "chest", "neck", "head"]   # 源脊柱采样点（髋中起）
-SRC_LEG = {"L": ("lThigh", "lShin", "lFoot"), "R": ("rThigh", "rShin", "rFoot")}
-SRC_ARM = {"L": ("lShldr", "lForeArm", "lHand"), "R": ("rShldr", "rForeArm", "rHand")}
+# 源侧命名变体（按骨架骨名自动识别）：
+#   daz   默认：cgspeed Daz 命名（hip/abdomen/chest/neck/head/lThigh/lShin/lFoot/
+#         lCollar/lShldr/lForeArm/lHand/lIndex1..）
+#   amass CMU-as-AMASS/SMPL 系（root/lowerback/upperback/thorax/lowerneck/
+#         upperneck/head/lfemur/ltibia/lfoot/lclavicle/lhumerus/lradius/lwrist）
+#   mixamo Mixamo 命名（mixamorig: 前缀，BVH 导出与 FBX 导入同命名）：
+#         Hips/Spine/Spine1/Spine2/Neck/Head/LeftShoulder/LeftArm/LeftForeArm/
+#         LeftHand/LeftUpLeg/LeftLeg/LeftFoot/LeftToeBase + 手四节指链
+#         （Thumb1-4/Index1-4/Middle1-4/Ring1-4/Pinky1-4，只取前两节）。
+# amass 源无指根/手指骨 → 手以腕骨世界旋转增量驱动（腕局部保持 rest）、
+# 手指保持 rest（_solve_hand 缺双向量基准时的兜底分支）。
+# mixamo 与 daz 同为 T-pose/A-pose 直立 rest（仅命名差异），求解路径一致。
+SRC_VARIANTS = {
+    "daz": {
+        "hip_candidates": ("hip", "Hips"),
+        "hipmid": ("lThigh", "rThigh"),
+        "abd": "abdomen",
+        "spine_pts": ("abdomen", "chest", "neck", "head"),
+        "neck": "neck",
+        "head": "head",
+        "leg": {"L": ("lThigh", "lShin", "lFoot"), "R": ("rThigh", "rShin", "rFoot")},
+        "arm": {"L": ("lShldr", "lForeArm", "lHand"), "R": ("rShldr", "rForeArm", "rHand")},
+        "shoulder": {"L": "lCollar", "R": "rCollar"},
+        "shldr_pts": ("lShldr", "rShldr"),
+        "fingers": FINGERS,
+        "viz": {},
+    },
+    "amass": {
+        "hip_candidates": ("root", "hip", "Hips"),
+        "hipmid": ("lfemur", "rfemur"),
+        "abd": "lowerback",
+        "spine_pts": ("lowerback", "upperback", "thorax", "lowerneck", "upperneck",
+                      "head"),
+        "neck": "upperneck",
+        "head": "head",
+        "leg": {"L": ("lfemur", "ltibia", "lfoot"), "R": ("rfemur", "rtibia", "rfoot")},
+        "arm": {"L": ("lhumerus", "lradius", "lwrist"), "R": ("rhumerus", "rradius", "rwrist")},
+        "shoulder": {"L": "lclavicle", "R": "rclavicle"},
+        "shldr_pts": ("lhumerus", "rhumerus"),
+        "fingers": {"L": [], "R": []},
+        # 骨架可视化 schema 别名：Daz 名 → 本变体骨名（kp_trio_render 用）
+        "viz": {
+            "hip": "root", "abdomen": "lowerback", "chest": "thorax",
+            "neck": "upperneck", "head": "head",
+            "lCollar": "lclavicle", "rCollar": "rclavicle",
+            "lShldr": "lhumerus", "rShldr": "rhumerus",
+            "lForeArm": "lradius", "rForeArm": "rradius",
+            "lHand": "lwrist", "rHand": "rwrist",
+            "lThigh": "lfemur", "rThigh": "rfemur",
+            "lShin": "ltibia", "rShin": "rtibia",
+            "lFoot": "lfoot", "rFoot": "rfoot",
+            "lToeBase": "ltoes", "rToeBase": "rtoes",
+        },
+    },
+    "mixamo": {
+        "hip_candidates": ("mixamorig:Hips", "Hips"),
+        "hipmid": ("mixamorig:LeftUpLeg", "mixamorig:RightUpLeg"),
+        "abd": "mixamorig:Spine",
+        "spine_pts": ("mixamorig:Spine", "mixamorig:Spine1", "mixamorig:Spine2",
+                      "mixamorig:Neck", "mixamorig:Head"),
+        "neck": "mixamorig:Neck",
+        "head": "mixamorig:Head",
+        "leg": {"L": ("mixamorig:LeftUpLeg", "mixamorig:LeftLeg", "mixamorig:LeftFoot"),
+                "R": ("mixamorig:RightUpLeg", "mixamorig:RightLeg", "mixamorig:RightFoot")},
+        "arm": {"L": ("mixamorig:LeftArm", "mixamorig:LeftForeArm", "mixamorig:LeftHand"),
+                "R": ("mixamorig:RightArm", "mixamorig:RightForeArm", "mixamorig:RightHand")},
+        "shoulder": {"L": "mixamorig:LeftShoulder", "R": "mixamorig:RightShoulder"},
+        "shldr_pts": ("mixamorig:LeftArm", "mixamorig:RightArm"),
+        "fingers": {
+            "L": [("cf_J_Hand_Index01_L", "cf_J_Hand_Index02_L",
+                   "mixamorig:LeftHandIndex1", "mixamorig:LeftHandIndex2"),
+                  ("cf_J_Hand_Middle01_L", "cf_J_Hand_Middle02_L",
+                   "mixamorig:LeftHandMiddle1", "mixamorig:LeftHandMiddle2"),
+                  ("cf_J_Hand_Ring01_L", "cf_J_Hand_Ring02_L",
+                   "mixamorig:LeftHandRing1", "mixamorig:LeftHandRing2"),
+                  ("cf_J_Hand_Little01_L", "cf_J_Hand_Little02_L",
+                   "mixamorig:LeftHandPinky1", "mixamorig:LeftHandPinky2"),
+                  ("cf_J_Hand_Thumb01_L", "cf_J_Hand_Thumb02_L",
+                   "mixamorig:LeftHandThumb1", "mixamorig:LeftHandThumb2")],
+            "R": [("cf_J_Hand_Index01_R", "cf_J_Hand_Index02_R",
+                   "mixamorig:RightHandIndex1", "mixamorig:RightHandIndex2"),
+                  ("cf_J_Hand_Middle01_R", "cf_J_Hand_Middle02_R",
+                   "mixamorig:RightHandMiddle1", "mixamorig:RightHandMiddle2"),
+                  ("cf_J_Hand_Ring01_R", "cf_J_Hand_Ring02_R",
+                   "mixamorig:RightHandRing1", "mixamorig:RightHandRing2"),
+                  ("cf_J_Hand_Little01_R", "cf_J_Hand_Little02_R",
+                   "mixamorig:RightHandPinky1", "mixamorig:RightHandPinky2"),
+                  ("cf_J_Hand_Thumb01_R", "cf_J_Hand_Thumb02_R",
+                   "mixamorig:RightHandThumb1", "mixamorig:RightHandThumb2")],
+        },
+        "viz": {
+            "hip": "mixamorig:Hips", "abdomen": "mixamorig:Spine",
+            "chest": "mixamorig:Spine2", "neck": "mixamorig:Neck",
+            "head": "mixamorig:Head",
+            "lCollar": "mixamorig:LeftShoulder", "rCollar": "mixamorig:RightShoulder",
+            "lShldr": "mixamorig:LeftArm", "rShldr": "mixamorig:RightArm",
+            "lForeArm": "mixamorig:LeftForeArm", "rForeArm": "mixamorig:RightForeArm",
+            "lHand": "mixamorig:LeftHand", "rHand": "mixamorig:RightHand",
+            "lThigh": "mixamorig:LeftUpLeg", "rThigh": "mixamorig:RightUpLeg",
+            "lShin": "mixamorig:LeftLeg", "rShin": "mixamorig:RightLeg",
+            "lFoot": "mixamorig:LeftFoot", "rFoot": "mixamorig:RightFoot",
+            "lToeBase": "mixamorig:LeftToeBase", "rToeBase": "mixamorig:RightToeBase",
+        },
+    },
+}
 
-# HS2 手部双向量参考（手掌纵轴/横轴采样骨）
-HAND_LONG_HS2 = {"L": "cf_J_Hand_Index01_L", "R": "cf_J_Hand_Index01_R"}
-HAND_LAT_HS2 = {"L": "cf_J_Hand_Little01_L", "R": "cf_J_Hand_Little01_R"}
-HAND_LONG_SRC = {"L": "lIndex1", "R": "rIndex1"}
-HAND_LAT_SRC = {"L": "lPinky1", "R": "rPinky1"}
+
+def _detect_src_variant(bvh_arm):
+    """按骨名识别源命名变体：Mixamo 系有 mixamorig: 前缀（或 Hips+LeftArm），
+    AMASS 系有 lfemur+lwrist，Daz 系有 lThigh+lHand"""
+    bones = set(bvh_arm.data.bones.keys())
+    if "mixamorig:Hips" in bones or any(b.startswith("mixamorig:") for b in bones):
+        return "mixamo"
+    if "lfemur" in bones and "lwrist" in bones:
+        return "amass"
+    return "daz"
 
 
 # ---------------------------------------------------------------- 工具 -----
@@ -127,10 +230,11 @@ def _rot_between(a, b):
 class KPDriver:
     """位置域驱动：把一个源骨架（BVH，逐帧 FK 世界点）驱动到 HS2 骨架。"""
 
-    def __init__(self, body_arm, bvh_arm, verbose=True):
+    def __init__(self, body_arm, bvh_arm, verbose=True, variant="daz"):
         self.body = body_arm
         self.bvh = bvh_arm
         self.verbose = verbose
+        self.src = SRC_VARIANTS[variant]
 
         # ---- rest 静态数据（世界系，M_fix 已应用后）----
         self.base_q = {}     # 骨 rest 世界旋转
@@ -188,13 +292,14 @@ class KPDriver:
         # 骨盆驱动采用“增量同构”而非“绝对正交基”：两侧 rest 已整体
         # 对齐（up 同向 + 左右校验），把源骨盆相对自身 rest 的姿态增量
         # 复制到 HS2 骨盆，与骨局部轴语义无关 → 无 180° 翻转歧义。
-        self.hip_src = next((n for n in ("hip", "Hips") if n in self.bvh.data.bones), None)
+        self.hip_src = next((n for n in self.src["hip_candidates"]
+                             if n in self.bvh.data.bones), None)
         if self.hip_src is not None:
             m = self.bvh.matrix_world @ self.bvh.data.bones[self.hip_src].matrix_local
             self.src_rest_q_hip = m.to_quaternion().normalized()
         else:
             self.src_rest_q_hip = None
-            print("[kp_retarget] 警告：源骨架无 hip/Hips 骨，骨盆退回正交基法")
+            print(f"[kp_retarget] 警告：源骨架无 {self.src['hip_candidates']} 骨，骨盆退回正交基法")
 
         # 源腿/臂静态全长（rest head 距离，对齐后）→ 当前帧髋→踝/肩→腕
         # 距离按该比例放大到 HS2 链长：保持弯曲形态（若按“当前帧距离”作
@@ -202,8 +307,8 @@ class KPDriver:
         self.src_leg_rest = {}
         self.src_arm_rest = {}
         for s in ("L", "R"):
-            sh, sk, sa = SRC_LEG[s]
-            ah = SRC_ARM[s]
+            sh, sk, sa = self.src["leg"][s]
+            ah = self.src["arm"][s]
             def _rhead(bn):
                 b = self.bvh.data.bones.get(bn)
                 if b is None:
@@ -225,6 +330,7 @@ class KPDriver:
         self.prev_q = {}      # 每骨上一帧 roll(时域稳定用, 防 180° 翻转)
         self.src_limb_f1 = {}   # 源四肢长骨 f1 世界旋转（roll 增量传递用）
         self.limb_hs2_f1 = {}   # HS2 四肢长骨 f1 实际世界旋转（传递基准）
+        self.limb_u_f1 = {}     # HS2 四肢长骨 f1 段向（微调后，后续帧增量用）
         self.src_head_f1 = None  # 源 head 骨 f1 世界旋转（头增量传递基准）
         self.head_hs2_f1 = None  # HS2 头骨 f1 实际世界旋转（传递基准）
         # 末端骨（踝/锁骨/手/指）f1 世界旋转基准 —— 完整增量传递用。
@@ -263,33 +369,62 @@ class KPDriver:
             return None
         return (self.bvh.matrix_world @ pb.matrix).to_quaternion().normalized()
 
+    def s_rest_q(self, bn):
+        rb = self.bvh.data.bones.get(bn)
+        if rb is None:
+            return None
+        return (self.bvh.matrix_world @ rb.matrix_local).to_quaternion().normalized()
+
     def _limb_q(self, src_bn, base_q, u0, d_target):
         """四肢长骨求解：源世界旋转增量 R 以 f1 实际姿态为基准传递，段方向由 IK 微调。
         旧法 _rot_between(u0, d)@base 是最短旋转——绕骨轴的 roll（大腿/上臂
         扭转）完全丢失且随方向漂移。新法：① R = 源骨世界旋转相对 f1 增量；
-        ② q_roll = R @ q_f1（q_f1 = HS2 f1 实际世界旋转，首帧 IK 解缓存；
-        若以 rest(base_q) 为基准，HS2 相对 f1 的增量 = R⊗M₁⁻¹——f1 的 IK
-        微调 M₁（源 f1 段方向 vs HS2 rest 段方向的比例差，臂上大）泄漏成
-        沿段方向 13~40° twist 误差；以 q_f1 为基准后增量 = M_t⊗R，仅剩
-        当帧微调）；③ 绕垂直轴微调 u_roll→d_target（u_roll = R 变换后的
-        f1 段方向）。建模几何（实测）：源骨 Y 沿段 0°，HS2 腿骨 Y 反向
-        180°、臂骨 Y 垂直 90°——R 是世界系完整旋转，作用与骨轴语义
-        无关，视觉段 twist 正确传递（腿实测误差 ≤4°）。源无该骨时返回
-        None 由调用方回退旧法。"""
+        ② q_roll = R @ q_f1（q_f1 = src_f1 ⊗ src_rest⁻¹ ⊗ h̃r 并微调到 f1 IK
+        段向，h̃r = HS2 rest 架绕段最小重滚使骨 Y 指向源 rest 段向——见 f1
+        分支注释；旧“f1 最小旋转 IK 解”的绕段 roll 任意 → 常值拧转 58-83°
+        泄漏全片）；③ 微调 u_roll→d_target（u_roll = R 变换后的 f1 段向，
+        微调轴⊥段向不引入绕段 roll）。建模几何（实测）：源骨 Y 沿段 0°，
+        HS2 腿骨 Y 反向 180°、臂骨 Y 垂直 90°——R 是世界系完整旋转，与骨
+        轴语义无关，视觉段 twist 正确传递。源无该骨时返回 None 由调用方
+        回退旧法。"""
         q_s = self.s_quat(src_bn)
         if q_s is None:
             return None
         ref = self.src_limb_f1.get(src_bn)
         if ref is None:
-            # f1: IK 对齐解即传递基准（HS2 f1 实际世界旋转）
-            q_f1 = (_rot_between(u0, d_target) @ base_q).normalized()
+            # f1: 源骨实际世界旋转 ⊗ 约定差作传递基准。旧法“IK 最小旋转解”
+            # 绕骨向 roll 为任意选取 → 后续帧 HS2=src⊗M、M 携带常值 roll
+            # 误差（metrixel 大腿 58-83° 拧转实测 _probe_twist4）。
+            # 约定差拆两段：C=src_rest⁻¹@hs_rest（骨架→骨架）+ K0（段向
+            # 对齐）：h̃r=hs_rest@K0 为“绕段最小重滚后骨 Y 指向源 rest 段向”
+            # 的 HS2 rest 架 —— 吸收 ①HS2 骨 Y 与段向的差（腿骨 Y 反向
+            # 180°/臂骨 Y⊥段）②源 rest 段向与 HS2 rest 段向的差（zombie
+            # BVH rest 大腿前倾 42°：仅用 C 时骨架匹配但段向偏 138°——
+            # _probe_zom 实测）。q_f1=src_f1@src_rest⁻¹@h̃r：段向=源 f1
+            # 段向（q_f1@hs_rest⁻¹@u0=src_f1@Y 恒等）、roll=源 roll、源
+            # 处于 rest 时退化为 h̃r（=HS2 rest 最小重滚）。段方向再以最小
+            # 旋转微调到 IK 目标 d_target（旋转轴⊥段向、不引入绕段 roll
+            # 分量；IK 可达时 d_target 与源 f1 段方向重合、微调=恒等）。
+            sr = self.s_rest_q(src_bn)
+            if sr is None:
+                q_f1 = (_rot_between(u0, d_target) @ base_q).normalized()
+            else:
+                v1 = (base_q.inverted() @ u0).normalized()          # HS2 rest 局部段向
+                v2 = (base_q.inverted() @ (sr @ _Y)).normalized()   # 源 rest 段向(HS2 局部)
+                hr_t = (base_q @ v1.rotation_difference(v2)).normalized()
+                q_f1 = (q_s @ sr.inverted() @ hr_t).normalized()
+                u_f1 = (q_f1 @ base_q.inverted()) @ u0   # = 源 f1 段向
+                q_f1 = (_rot_between(u_f1, d_target) @ q_f1).normalized()
             self.src_limb_f1[src_bn] = q_s.copy()
             self.limb_hs2_f1[src_bn] = q_f1
+            # 微调后 f1 段向（HS2 世界系）供后续帧增量用；经 q_f1 计算
+            # （=d_target 方向），不走 C 映射
+            self.limb_u_f1[src_bn] = ((q_f1 @ base_q.inverted()) @ u0).normalized()
             return q_f1
         q_f1 = self.limb_hs2_f1[src_bn]
         R = (q_s @ ref.inverted()).normalized()
         q_roll = (R @ q_f1).normalized()
-        u_f1 = (q_f1 @ base_q.inverted()) @ u0   # f1 实际段方向
+        u_f1 = self.limb_u_f1[src_bn]
         u_roll = (R @ u_f1).normalized()
         return (_rot_between(u_roll, d_target) @ q_roll).normalized()
 
@@ -406,12 +541,12 @@ class KPDriver:
 
         # 0. 源骨架姿态采样（须已 frame_set + update）
         hipmid = None
-        lh = self.s_head(SRC_HIPMID[0])
-        rh = self.s_head(SRC_HIPMID[1])
+        lh = self.s_head(self.src["hipmid"][0])
+        rh = self.s_head(self.src["hipmid"][1])
         if lh is not None and rh is not None:
             hipmid = (lh + rh) * 0.5
         if hipmid is None:
-            raise RuntimeError("源骨架缺少 lThigh/rThigh")
+            raise RuntimeError(f"源骨架缺少 {self.src['hipmid']}")
 
         # ---- 1. 骨盆（Hips）：增量同构 —— 源骨盆相对自身 rest 的旋转增量，
         # 原样复制到 HS2 骨盆（两侧 rest 已对齐 → 增量域无翻转歧义）。
@@ -427,7 +562,7 @@ class KPDriver:
                 pelvis_q = (self.base_q["cf_J_Hips"] @ r_rel).normalized()
         if pelvis_q is None:
             # 兜底：髋线 + 髋中→腹点正交基（注意行基需转置才是正确旋转）
-            abd = self.s_head(SRC_ABD)
+            abd = self.s_head(self.src["abd"])
             y0 = abd - hipmid
             y0 -= x0 * x0.dot(y0)
             y0.normalize()
@@ -445,8 +580,8 @@ class KPDriver:
             hip_x_src = x0
         # 源肩胛线（臂链弯曲平面参考轴）
         shoulder_ax_src = None
-        _s_ls = self.s_head("lShldr")
-        _s_rs = self.s_head("rShldr")
+        _s_ls = self.s_head(self.src["shldr_pts"][0])
+        _s_rs = self.s_head(self.src["shldr_pts"][1])
         if _s_ls is not None and _s_rs is not None:
             _v = _s_ls - _s_rs
             if _v.length > 1e-4:
@@ -461,7 +596,7 @@ class KPDriver:
         #               恢复转体/侧弯的躯干扭转 → 肩点随之自动正确。
         # 源脊柱采样点序列（自髋中向上）与折线弧长表
         src_pts = [hipmid]
-        for bn in SRC_SPINE_PTS:
+        for bn in self.src["spine_pts"]:
             p = self.s_head(bn)
             if p is None:
                 break
@@ -499,7 +634,7 @@ class KPDriver:
                     if s <= seg_a[i + 1]:
                         k = i
                         break
-            sb = self.hip_src if k == 0 else SRC_SPINE_PTS[k - 1]
+            sb = self.hip_src if k == 0 else self.src["spine_pts"][k - 1]
             pb = self.bvh.pose.bones.get(sb)
             if pb is None:
                 return None
@@ -544,9 +679,9 @@ class KPDriver:
         # 增量差角最大 40.7°，f550/f592 头部朝向明显偏）。新法：f1 用
         # 旧式 IK 解作基准（f1 姿态不变），之后帧 R=源头骨世界旋转
         # 相对 f1 增量完整传递 q = R ⊗ q_f1 —— 歪头/转头全自由度保真。
-        nk = self.s_head("neck")
-        hd = self.s_head("head")
-        q_s_h = self.s_quat("head")
+        nk = self.s_head(self.src["neck"])
+        hd = self.s_head(self.src["head"])
+        q_s_h = self.s_quat(self.src["head"])
         if q_s_h is not None and HEAD_BONE in self.base_q:
             if self.src_head_f1 is None:
                 # f1: 旧式 IK 解（方向 + 源X投影roll）作传递基准
@@ -557,7 +692,7 @@ class KPDriver:
                         hdir.normalize()
                         base_h = self.base_q[HEAD_BONE]
                         q_f1 = (_rot_between(base_h @ _Y, hdir) @ base_h).normalized()
-                        pb_h = self.bvh.pose.bones.get("head")
+                        pb_h = self.bvh.pose.bones.get(self.src["head"])
                         if pb_h is not None:
                             px = ((self.bvh.matrix_world @ pb_h.matrix).to_3x3() @ _X).normalized()
                             rx = q_f1 @ _X
@@ -583,7 +718,7 @@ class KPDriver:
                 hdir.normalize()
                 base_h = self.base_q[HEAD_BONE]
                 q_h = (_rot_between(base_h @ _Y, hdir) @ base_h).normalized()
-                pb_h = self.bvh.pose.bones.get("head")
+                pb_h = self.bvh.pose.bones.get(self.src["head"])
                 if pb_h is not None:
                     px = ((self.bvh.matrix_world @ pb_h.matrix).to_3x3() @ _X).normalized()
                     rx = q_h @ _X
@@ -606,7 +741,7 @@ class KPDriver:
             H = hips_pos + hips_q_now @ self.hip_off[s]
             self.pos_cache[h] = H
             # 源关节点（髋/膝/踝）
-            sh, sk, sa = SRC_LEG[s]
+            sh, sk, sa = self.src["leg"][s]
             S_h, S_k, S_a = self.s_head(sh), self.s_head(sk), self.s_head(sa)
             L1, L2 = self.leg_len[s]
             total_hs = L1 + L2
@@ -683,9 +818,18 @@ class KPDriver:
             if q_s_ft is not None and a in self.base_q:
                 ref = self.src_footq_f1.get(s)
                 if ref is None:
+                    # f1 基准 = 源脚 f1 实际旋转 ⊗ C（同 _limb_q）：源处于
+                    # rest 时退化为 base_q。旧法恒 base_q → 源 f1 相对源
+                    # rest 的旋转（含 roll）丢失 → 脚常值拧转（walk 34°/
+                    # metrixel 97° _probe_twist4 实测）。
                     self.src_footq_f1[s] = q_s_ft.copy()
-                    self.foot_hs2_f1[s] = self.base_q[a].copy()
-                    self.set_desired(a, self.base_q[a])
+                    sr = self.s_rest_q(sa)
+                    if sr is None:
+                        self.foot_hs2_f1[s] = self.base_q[a].copy()
+                    else:
+                        self.foot_hs2_f1[s] = (q_s_ft @ sr.inverted()
+                                               @ self.base_q[a]).normalized()
+                    self.set_desired(a, self.foot_hs2_f1[s])
                 else:
                     R = (q_s_ft @ ref.inverted()).normalized()
                     self.set_desired(a, (R @ self.foot_hs2_f1[s]).normalized())
@@ -698,9 +842,21 @@ class KPDriver:
                 tb = TOES[s]
                 if tb in self.base_q:
                     if ref is None:
-                        self.toes_hs2_f1[s] = (Quaternion((1.0, 0.0, 0.0),
-                                                          TOES_FLAT_PITCH)
-                                               @ self.base_q[tb]).normalized()
+                        # 趾相对脚刚体跟随（源无趾骨）：f1 基准 = 脚的源 f1
+                        # 增量(q_s_ft@src_rest⁻¹)作用于平放补偿⊗rest——与脚
+                        # 新基准(q_s_ft@C)保持同一恒定相对旋转（旧法脚基准恒
+                        # rest、趾基准恒补偿⊗rest 同样相对一致；脚基准改后
+                        # 趾必须同乘增量，否则趾相对脚被甩出拧转）
+                        sr = self.s_rest_q(sa)
+                        if sr is None:
+                            self.toes_hs2_f1[s] = (Quaternion((1.0, 0.0, 0.0),
+                                                              TOES_FLAT_PITCH)
+                                                   @ self.base_q[tb]).normalized()
+                        else:
+                            self.toes_hs2_f1[s] = (q_s_ft @ sr.inverted()
+                                                   @ Quaternion((1.0, 0.0, 0.0),
+                                                                TOES_FLAT_PITCH)
+                                                   @ self.base_q[tb]).normalized()
                         self.set_desired(tb, self.toes_hs2_f1[s])
                     else:
                         R = (q_s_ft @ ref.inverted()).normalized()
@@ -718,15 +874,24 @@ class KPDriver:
         # 肩锚连带错位。完整增量后锁骨世界增量=源 collar 世界增量，锁骨
         # 局部=源 collar 相对源 chest 的真实局部角，转体由脊柱链承担。
         for s in ("L", "R"):
-            sb, src_bn = SHOULDER[s]
+            sb = SHOULDER_HS2[s]
+            src_bn = self.src["shoulder"][s]
             q_s_c = self.s_quat(src_bn)
             if q_s_c is None or sb not in self.base_q:
                 continue
             ref = self.src_collarq_f1.get(s)
             if ref is None:
+                # f1 基准 = 源锁骨 f1 实际旋转 ⊗ C（同 _limb_q/脚）。旧法恒
+                # base_q → 源 f1 相对源 rest 的旋转丢失 → 锁骨常值拧转
+                # （walk 19°/metrixel 87° _probe_twist4 实测）
                 self.src_collarq_f1[s] = q_s_c.copy()
-                self.collar_hs2_f1[s] = self.base_q[sb].copy()
-                self.set_desired(sb, self.base_q[sb])
+                sr = self.s_rest_q(src_bn)
+                if sr is None:
+                    self.collar_hs2_f1[s] = self.base_q[sb].copy()
+                else:
+                    self.collar_hs2_f1[s] = (q_s_c @ sr.inverted()
+                                             @ self.base_q[sb]).normalized()
+                self.set_desired(sb, self.collar_hs2_f1[s])
             else:
                 R = (q_s_c @ ref.inverted()).normalized()
                 self.set_desired(sb, (R @ self.collar_hs2_f1[s]).normalized())
@@ -734,7 +899,7 @@ class KPDriver:
         # ---- 4. 臂（2 段 IK + 肘侧向先验）----
         for s in ("L", "R"):
             h2, e, w_ = ARM[s]
-            S_sh, S_el, S_wr = SRC_ARM[s]
+            S_sh, S_el, S_wr = self.src["arm"][s]
             H = self.calc_pos(h2)   # 肩关节（脊柱/锁骨链解析后）
             if H is None:
                 continue
@@ -773,7 +938,7 @@ class KPDriver:
                 K = C + b * h_c * (1.0 if (S_e - S_h2).dot(b) >= 0 else -1.0)
             d1 = (K - H).normalized()
             d2 = (A - K).normalized()
-            q_up = self._limb_q(SRC_ARM[s][0], self.base_q[h2],
+            q_up = self._limb_q(self.src["arm"][s][0], self.base_q[h2],
                                 self.arm_u0[s][0], d1)
             if q_up is None:
                 q_up = (_rot_between(self.arm_u0[s][0], d1)
@@ -782,7 +947,7 @@ class KPDriver:
             else:
                 # 同腿：源 roll 连续，无需（且不可）冻结
                 self.set_desired(h2, q_up)
-            q_lo = self._limb_q(SRC_ARM[s][1], self.base_q[e],
+            q_lo = self._limb_q(self.src["arm"][s][1], self.base_q[e],
                                 self.arm_u0[s][1], d2)
             if q_lo is None:
                 q_lo = (_rot_between(self.arm_u0[s][1], d2)
@@ -790,28 +955,30 @@ class KPDriver:
                 self.set_desired(e, self._stabilize(e, q_lo, d2))
             else:
                 self.set_desired(e, q_lo)
-            # 手：双向量（纵=指根向，横=食指根-小指根）恢复完整 3DOF
-            self._solve_hand(s, S_w)
+            # 手：完整世界旋转增量传递（f1 基准 = 源手骨 f1 ⊗ C，同脚方案）
+            self._solve_hand(s)
             if _DBG:
                 print(f"    [arm{s}] H={H} A={A} d={d:.3f} d1={d1} src_sh={S_h2} src_w={S_w}")
 
         # ---- 5. 手指：逐节绝对方向 ----
         for s in ("L", "R"):
-            for hs_a, hs_b, src_a, src_b in FINGERS[s]:
+            for hs_a, hs_b, src_a, src_b in self.src["fingers"][s]:
                 self._solve_finger(hs_a, hs_b, src_a, src_b)
 
     # ---------------- 手/脚/指细节 ----------------
 
-    def _solve_hand(self, side, wrist_pos):
-        """手：完整世界旋转增量传递（f1 用双向量解定基准，同脚/头思想）。
-        旧法逐帧“双向量绝对对齐”把源手世界朝向（含转体大旋转）绝对地
-        施加在 rest 手上，而前臂已由 _limb_q 传源前臂完整增量 → 转体被
-        算两遍，腕局部过转（实测 HS2 腕L 117-120° vs 源腕L 局部仅
-        34-43°）。f1 双向量解只作姿态基准（两侧手建模基态差被吸收），
-        之后帧 R=源手骨世界旋转增量 → 手世界增量=源手世界增量（含
-        roll/翻转/转掌全保真），腕局部=源腕局部（_probe_footdrv）。"""
+    def _solve_hand(self, side):
+        """手：完整世界旋转增量传递（f1 基准 = 源手骨 f1 实际旋转 ⊗ C，
+        同 _limb_q/脚/锁骨）。旧法逐帧“双向量绝对对齐”把源手世界朝向
+        （含转体大旋转）绝对地施加在 rest 手上，而前臂已由 _limb_q 传源
+        前臂完整增量 → 转体被算两遍，腕局部过转（实测 HS2 腕L 117-120°
+        vs 源腕L 局部仅 34-43°）；改为 f1 基准 + 增量后修复。旧 f1 双向量
+        解把“源手骨系 vs 源指根几何系”的偏角（Mixamo 19°）冻结进基准、
+        源无指根骨时（AMASS）更直接取 rest → 手常值拧转（walk 19°/
+        metrixel 69° _probe_twist4）。新法 HS2(f)=src(f)@C 逐帧精确、
+        源处于 rest 时退化为 base_q；腕局部=源腕局部（≤72° 实测）。"""
         h2, e, hand_bn = ARM[side]
-        q_s_h = self.s_quat(SRC_ARM[side][2])
+        q_s_h = self.s_quat(self.src["arm"][side][2])
         if q_s_h is None or hand_bn not in self.base_q:
             return
         ref = self.src_handq_f1.get(side)
@@ -819,45 +986,14 @@ class KPDriver:
             R = (q_s_h @ ref.inverted()).normalized()
             self.set_desired(hand_bn, (R @ self.hand_hs2_f1[side]).normalized())
             return
-        # ---- f1: 双向量解（纵=指根向，横=食指根-小指根）作传递基准 ----
-        # 目标手系：源 指根向 + 食指根-小指根横轴（腕点= wrist_pos）
-        long_src = self.s_head(HAND_LONG_SRC[side])
-        lat_src = self.s_head(HAND_LAT_SRC[side])
-        if long_src is None or lat_src is None or wrist_pos is None:
-            return
-        v_long_src = long_src - wrist_pos
-        v_lat_src = lat_src - wrist_pos
-        if v_long_src.length < 1e-5 or v_lat_src.length < 1e-5:
-            return
-        v_long_src.normalize()
-        v_lat_src -= v_long_src * v_lat_src.dot(v_long_src)
-        v_lat_src.normalize()
-        # HS2 侧同一结构（rest 世界向量）
-        rp = self.rest_p[hand_bn]
-        l2 = self.rest_p.get(HAND_LONG_HS2[side])
-        t2 = self.rest_p.get(HAND_LAT_HS2[side])
-        if l2 is None or t2 is None:
-            return
-        u_long = (l2 - rp).normalized()
-        u_lat = t2 - rp
-        u_lat -= u_long * u_lat.dot(u_long)
-        u_lat.normalize()
-        # 两段旋转精确对齐双向量（避免 Matrix 行基构造的转置歧义）：
-        #   R1: u_long → v_long 的最短旋转
-        #   R2: 绕 v_long（源长轴）旋转，把 R1 后的横轴 lat1 转到 v_lat
-        base = self.base_q[hand_bn]
-        R1 = u_long.rotation_difference(v_long_src)
-        lat1 = R1 @ u_lat
-        v_ax = v_long_src
-        # 绕 v_ax 把 lat1 转到 v_lat 的右手角：atan2((lat1×v_lat)·ax, lat1·v_lat)
-        # （旧式 lat1·(v_ax×v_lat) 恒取反号 —— 手 twist 镜像，同脊柱 roll bug）
-        s = lat1.cross(v_lat_src).dot(v_ax)
-        c = lat1.dot(v_lat_src)
-        R2 = Quaternion(v_ax, math.atan2(s, c))
-        q_hand = ((R2 @ R1) @ base).normalized()
-        self.set_desired(hand_bn, q_hand)
         self.src_handq_f1[side] = q_s_h.copy()
-        self.hand_hs2_f1[side] = q_hand.copy()
+        sr = self.s_rest_q(self.src["arm"][side][2])
+        if sr is None:
+            self.hand_hs2_f1[side] = self.base_q[hand_bn].copy()
+        else:
+            self.hand_hs2_f1[side] = (q_s_h @ sr.inverted()
+                                      @ self.base_q[hand_bn]).normalized()
+        self.set_desired(hand_bn, self.hand_hs2_f1[side])
 
     def _solve_finger(self, hs_a, hs_b, src_a, src_b):
         """指节：完整世界旋转增量传递（f1 用绝对方向解定基准，同手方案）。
@@ -905,13 +1041,27 @@ class KPDriver:
 
 # ---------------------------------------------------------------- 顶层 ----
 def kp_drive(bvh_path, body_arm, action_name=None, fps=30):
-    """加载 BVH 源骨架，位置域逐帧驱动 HS2 骨架并烘焙 rotation keyframes。
+    """加载源骨架（BVH 或 Mixamo FBX），位置域逐帧驱动 HS2 骨架并烘焙
+    rotation keyframes。
 
     返回 (body_act, n_frames)
     """
     before = set(bpy.data.objects)
-    bpy.ops.import_anim.bvh(filepath=bvh_path)
-    bvh_arm = next(o for o in bpy.data.objects if o not in before and o.type == "ARMATURE")
+    if bvh_path.lower().endswith(".fbx"):
+        # Mixamo FBX：动画在 Hips 骨上（非对象级），直接复用 BVH 同款管线。
+        # 导入的网格/其余对象对模仿无用 → 删除，只留骨架。
+        bpy.ops.import_scene.fbx(filepath=bvh_path)
+        new_objs = [o for o in bpy.data.objects if o not in before]
+        bvh_arm = next(o for o in new_objs if o.type == "ARMATURE")
+        for o in new_objs:
+            if o is not bvh_arm:
+                bpy.data.objects.remove(o, do_unlink=True)
+    else:
+        bpy.ops.import_anim.bvh(filepath=bvh_path)
+        bvh_arm = next(o for o in bpy.data.objects if o not in before and o.type == "ARMATURE")
+    variant = _detect_src_variant(bvh_arm)
+    vsrc = SRC_VARIANTS[variant]
+    print(f"[kp_retarget] 源命名变体: {variant}")
     bvh_act = bvh_arm.animation_data.action if bvh_arm.animation_data else None
     if bvh_act is None:
         cands = sorted(bpy.data.actions, key=lambda a: a.users, reverse=True)
@@ -929,8 +1079,17 @@ def kp_drive(bvh_path, body_arm, action_name=None, fps=30):
         if b is None:
             return None
         m = arm.matrix_world @ b.matrix_local
-        return m.to_3x3() @ _Y
-    src_up = _y_rest(bvh_arm, "hip")
+        # 归一化：FBX 导入的 matrix_world 带 0.01 单位缩放（cm→m），
+        # 未归一化会被下方的 length>0.5 检查误判为缺参考骨
+        return (m.to_3x3() @ _Y).normalized()
+
+    def _first_bone(arm, names):
+        for n in names:
+            if n in arm.data.bones:
+                return n
+        return None
+
+    src_up = _y_rest(bvh_arm, _first_bone(bvh_arm, vsrc["hip_candidates"]))
     hs_arm_bone = body_arm.data.bones.get("cf_J_Hips")
     if hs_arm_bone is not None:
         hs_up = _y_rest(body_arm, "cf_J_Hips")
@@ -938,9 +1097,9 @@ def kp_drive(bvh_path, body_arm, action_name=None, fps=30):
         hs_up = None
     if src_up is not None and hs_up is not None and src_up.length > 0.5 and hs_up.length > 0.5:
         Q_a = src_up.normalized().rotation_difference(hs_up.normalized())
-        # 左右轴符号校验（源 lThigh-rThigh 方向 vs HS2 LegUp00 同侧差，rest）
-        sl = bvh_arm.data.bones.get("lThigh")
-        sr = bvh_arm.data.bones.get("rThigh")
+        # 左右轴符号校验（源髋线方向 vs HS2 LegUp00 同侧差，rest）
+        sl = bvh_arm.data.bones.get(vsrc["hipmid"][0])
+        sr = bvh_arm.data.bones.get(vsrc["hipmid"][1])
         hl = body_arm.data.bones.get("cf_J_LegUp00_L")
         hr = body_arm.data.bones.get("cf_J_LegUp00_R")
         if sl and sr and hl and hr:
@@ -951,7 +1110,11 @@ def kp_drive(bvh_path, body_arm, action_name=None, fps=30):
             if (Q_a @ sv.normalized()).dot(hv.normalized()) < 0:
                 Q_a = Quaternion(hs_up.normalized(), math.pi) @ Q_a
         M_a = Q_a.to_matrix().to_4x4()
-        bvh_arm.matrix_world = M_a
+        # 必须左乘合成而非整体替换：FBX 导入的 matrix_world 自带轴系换算旋转
+        # (Rx90°)，src_up 是含该矩阵测得的；替换会把换算丢掉 → 源骨架被
+        # 翻转 180°（Mixamo Running/Walking FBX 实证：对齐后头部低于髋）。
+        # BVH 导入 matrix_world 为恒等旋转 → 合成与替换等价，不受影响。
+        bvh_arm.matrix_world = M_a @ bvh_arm.matrix_world
         bpy.context.view_layer.update()
         print(f"[kp_retarget] 源骨架对齐 src_up={src_up.normalized()} hs_up={hs_up.normalized()} Q={Q_a}")
     else:
@@ -964,7 +1127,7 @@ def kp_drive(bvh_path, body_arm, action_name=None, fps=30):
     def _bhead(a, bn):
         b = a.data.bones.get(bn)
         return (a.matrix_world @ b.matrix_local).to_translation() if b is not None else None
-    _bv = [_bhead(bvh_arm, x) for x in ("lThigh", "rThigh", "head")]
+    _bv = [_bhead(bvh_arm, x) for x in (vsrc["hipmid"][0], vsrc["hipmid"][1], vsrc["head"])]
     _hv = [_bhead(body_arm, x) for x in ("cf_J_LegUp00_L", "cf_J_LegUp00_R", "cf_J_Head_s")]
     if all(v is not None for v in _bv + _hv):
         bvm = (_bv[0] + _bv[1]) * 0.5   # 源髋中（旋转对齐后, rest）
@@ -981,7 +1144,7 @@ def kp_drive(bvh_path, body_arm, action_name=None, fps=30):
         def _fhead(a, bn):
             pb = a.pose.bones.get(bn)
             return (a.matrix_world @ pb.matrix).to_translation() if pb is not None else None
-        _fb = [_fhead(bvh_arm, x) for x in ("lThigh", "rThigh")]
+        _fb = [_fhead(bvh_arm, x) for x in (vsrc["hipmid"][0], vsrc["hipmid"][1])]
         if all(v is not None for v in _fb):
             fbm = (_fb[0] + _fb[1]) * 0.5   # 动画首帧源髋中
             T = hsm - fbm * S
@@ -1007,7 +1170,7 @@ def kp_drive(bvh_path, body_arm, action_name=None, fps=30):
         pb.rotation_mode = 'QUATERNION'
     bpy.context.view_layer.update()
 
-    drv = KPDriver(body_arm, bvh_arm)
+    drv = KPDriver(body_arm, bvh_arm, variant=variant)
     print(f"[kp_retarget] 腿长 L/R: {drv.leg_len}  臂长 L/R: {drv.arm_len}")
 
     scene = bpy.context.scene
@@ -1031,7 +1194,8 @@ if __name__ == "__main__":
     ap.add_argument("--bvh", required=True)
     ap.add_argument("--frames", default=None)
     ap.add_argument("--out-action", default=None)
-    args = ap.parse_args()
+    argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else sys.argv[1:]
+    args = ap.parse_args(argv)
 
     M_fix = Matrix.Rotation(math.pi, 4, 'X')
     for o in list(bpy.data.objects):

@@ -18,7 +18,12 @@ myhs2/
 │   ├── kp_trio_render.py      三栏对比渲染：源BVH骨架 | HS2骨架 | HS2模型
 │   ├── kp_model_render.py     完整角色（7 部件）单模型渲染
 │   └── samples/
-│       └── pirouette.bvh      示例动捕数据（CMU 命名骨名）
+│       ├── pirouette.bvh      示例动捕数据（CMU/Daz 命名骨名）
+│       ├── 05_02__dance-…bvh   舞蹈（AMASS 命名）
+│       ├── 09_12__navigate-walk-…bvh  前进/后退/侧向走
+│       ├── 10_01__soccer-kick-ball__120fps.bvh  踢球
+│       ├── 90_02__cartwheel__120fps.bvh         侧手翻
+│       └── 104_10__jogstop__120fps.bvh          慢跑急停
 ├── character/                 捏人（骨骼增量）模块
 │   ├── shape_data.py          HoneySelect 捏人数据表解析与评估
 │   ├── shape_apply.py         将骨骼增量应用到 Blender Armature pose
@@ -68,6 +73,10 @@ myhs2/
 
 - 骨架栏走「骨盆居中系」消除 BVH root 轨迹位移；源侧按 rest 世界垂直跨度
   比缩放（BVH 数据空间为 100m 级未缩放 cm）。
+- 朝向基准三栏统一：骨盆居中系末步为「逆旋首帧(f1)骨盆 → `R_SHOW`」，即把
+  f1 朝向当正面；模型栏同样左乘这个复合旋转 `R_SHOW @ q_f1⁻¹`，否则右栏会带上
+  源 f1 的世界转身（样本实测 0°~156° 不等）而与骨架栏"站立角度"对不上。
+  只乘 `q_f1⁻¹` 会把角色上轴转到 +y（模型躺倒）；`--rest` 下该乘子≈单位阵。
 - 三栏各自独立渲染（同场景「每帧改骨架」与「模型渲染」互斥），最后用
   `_imgcat.py` 拼接。
 - `--rest` 仅渲染 HS2 rest 骨架+模型两栏（装配自检）；`--headshot` 额外
@@ -163,10 +172,37 @@ blender -b --factory-startup --python pose/kp_model_render.py -- \
 
 ## BVH 兼容性
 
-源骨架骨名采用 **CMU 命名**（`hip / lThigh / lShin / lFoot / abdomen / chest /
-neck / head / lCollar / lShldr / lForeArm / lHand / lIndex1..` 等），
-完整映射表见 `docs/skeleton.md`。Mixamo 等其他命名需先改 `kp_retarget.py`
-中的 `SRC_*` 常量表。
+源骨架骨名自动识别三种命名变体（`_detect_src_variant`），且 `--bvh`
+参数同时接受 **BVH 与 Mixamo FBX**（按扩展名分流导入，FBX 动画在
+Hips 骨上、直接复用同款管线）：
+
+- **CMU/Daz 命名**（`hip / lThigh / lShin / lFoot / abdomen / chest / neck /
+  head / lCollar / lShldr / lForeArm / lHand / lIndex1..` 等），完整映射表见
+  `docs/skeleton.md`。
+- **AMASS 命名**（`root / lowerback / upperback / thorax / lowerneck /
+  upperneck / head / lfemur / ltibia / lfoot / ltoes / lclavicle /
+  lhumerus / lradius / lwrist`），如
+  [metrixel-cmu-mocap-clean](https://huggingface.co/datasets/EntVista/metrixel-cmu-mocap-clean)
+  清洗版 CMU 动作库（120fps、去抖、foot-locked）。该变体无手/指骨，
+  手由腕骨世界旋转兜底驱动、手指保持 rest。
+- **Mixamo 命名**（`mixamorig:` 前缀，BVH 导出与 FBX 导入同名）：
+  `Hips / Spine / Spine1 / Spine2 / Neck / Head / LeftShoulder / LeftArm /
+  LeftForeArm / LeftHand / LeftUpLeg / LeftLeg / LeftFoot / LeftToeBase` +
+  手指链（Thumb/Index/Middle/Ring/Pinky 各 4 节，取前两节）。FBX 导入自带
+  轴系换算（matrix_world 含 Rx90° + 0.01 缩放），朝向对齐用左乘合成保留该
+  换算（整体替换会翻转源骨架 180°）；单位缩放由后续整体 S 对齐吸收。
+
+其余命名需在 `kp_retarget.py` 的 `SRC_VARIANTS` 中新增条目。
+
+### 样本（pose/samples/）
+
+- **metrixel CMU 清洗版**（AMASS 命名，120fps）：`jogstop`、`cartwheel`、
+  `soccer-kick-ball`、`walk`、`dance` 等 5 段，见
+  [metrixel-cmu-mocap-clean](https://huggingface.co/datasets/EntVista/metrixel-cmu-mocap-clean)。
+- **Mixamo FBX**（30fps）：`Walking.fbx`（43f）、`Running.fbx`（77f，实为
+  奔跑中摔倒起身动作）、`Macarena_Dance.fbx`（248f）、`Cartwheel.fbx`（107f）、
+  `Kick_Soccerball.fbx`（18f）。
+- **Mixamo BVH**：`ZombieKicking_mixamo.bvh`（250f，全关节 6 通道）。
 
 ## 已知设计细节
 

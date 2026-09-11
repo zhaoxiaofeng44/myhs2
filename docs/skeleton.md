@@ -23,6 +23,17 @@ HS2 角色由 7 个独立 FBX 部件组成：
 ## 2. 姿势驱动骨与源骨架映射
 
 源骨架为 BVH 动捕（**CMU 命名**）。位置域求解器每帧驱动下表 HS2 骨。
+下表源骨列以 CMU 命名为准；**AMASS 命名变体**（`root / lowerback /
+upperback / thorax / lowerneck / upperneck / head / lfemur / ltibia /
+lfoot / ltoes / lclavicle / lhumerus / lradius / lwrist`）与
+**Mixamo 命名变体**（`mixamorig:` 前缀：`Hips / Spine / Spine1 /
+Spine2 / Neck / Head / LeftShoulder / LeftArm / LeftForeArm / LeftHand /
+LeftUpLeg / LeftLeg / LeftFoot / LeftToeBase` + 四节手指链）由
+`kp_retarget.py` 的 `SRC_VARIANTS` 表自动翻译（`_detect_src_variant`
+按骨名前缀/特征骨判别），求解流程不变。AMASS 无手/指骨：
+`_solve_hand` 走腕骨世界旋转兜底、手指保持 rest。Mixamo 可走 BVH 或
+FBX（`kp_drive` 按扩展名分流导入；FBX 动画在 Hips 骨、matrix_world
+带 0.01 单位缩放，已在朝向对齐中归一化）。
 
 ### 2.1 中轴线（骨盆 → 头）
 

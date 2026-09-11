@@ -80,22 +80,23 @@ for pb in arm.pose.bones:
 bpy.context.view_layer.update()
 
 # ---- 捏人数据加载 ----
-shape_sliders = {"face": {}, "body": {}}
+# 中性渲染(无 --shape-json)不加载捏人数据表(同 kp_trio_render: 隔离包无默认路径)
+morph_deltas = {"face": {}, "body": {}}
 if args.shape_json:
+    if not os.path.isdir(args.data_dir or ""):
+        raise SystemExit(f"[model_render] --shape-json 需要 --data-dir 指向游戏 Data 目录, 现: {args.data_dir}")
     with open(args.shape_json, encoding="utf-8") as f:
         raw = json.load(f)
     shape_sliders = {sec: {int(k): v for k, v in raw.get(sec, {}).items()} for sec in ("face", "body")}
-
-morph_deltas = {}
-for sec in ("face", "body"):
-    sd = ShapeData(args.data_dir, sec)
-    deltas, missing = sd.evaluate(shape_sliders[sec])
-    morph_deltas[sec] = deltas
-    print(f"[MORPH] {sec}: sliders={shape_sliders[sec]} -> {len(deltas)} bones"
-          + (f", missing={missing}" if missing else ""))
-    for cid in sorted(shape_sliders[sec]):
-        zh = CAT_ZH[sec].get(cid, "?")
-        print(f"    cat {cid} {zh}: slider={shape_sliders[sec][cid]}")
+    for sec in ("face", "body"):
+        sd = ShapeData(args.data_dir, sec)
+        deltas, missing = sd.evaluate(shape_sliders[sec])
+        morph_deltas[sec] = deltas
+        print(f"[MORPH] {sec}: sliders={shape_sliders[sec]} -> {len(deltas)} bones"
+              + (f", missing={missing}" if missing else ""))
+        for cid in sorted(shape_sliders[sec]):
+            zh = CAT_ZH[sec].get(cid, "?")
+            print(f"    cat {cid} {zh}: slider={shape_sliders[sec][cid]}")
 
 # ---- rebind 组(top/bot/shoe): 换绑到 body_arm; body mesh 同套 FIX ----
 
