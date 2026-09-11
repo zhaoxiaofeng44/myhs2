@@ -19,6 +19,11 @@ myhs2/
 │   ├── kp_model_render.py     完整角色（7 部件）单模型渲染
 │   └── samples/
 │       └── pirouette.bvh      示例动捕数据（CMU 命名骨名）
+├── character/                 捏人（骨骼增量）模块
+│   ├── shape_data.py          HoneySelect 捏人数据表解析与评估
+│   ├── shape_apply.py         将骨骼增量应用到 Blender Armature pose
+│   ├── category_names.py      分类中文名参考
+│   └── sliders.example.json   滑杆配置示例
 ├── _imgcat.py                 渲染后处理：竖幅栏 → 横幅对比图（Pillow）
 ├── _gridcat.py                渲染后处理：多帧对比图 → 网格总览图（Pillow）
 └── docs/
@@ -131,6 +136,30 @@ blender -b --factory-startup --python pose/kp_model_render.py -- \
     --fbx-dir /path/to/fbx --bvh pose/samples/pirouette.bvh \
     --frames 1,150,300 --out pose/renders
 ```
+
+### 捏人（角色定制）
+
+本工程支持基于 HoneySelect 原作的捏人数据表对角色形象进行骨骼级定制。
+需要额外提供 `HoneySelect/Assets/Data/` 下的数据表（`cf_customhead.txt`、
+`cf_custombody.txt`、`cf_anmShapeHead.txt`、`cf_anmShapeBody.txt`、
+`face_bone_mappings.csv`、`bone_mappings.csv`）。
+
+```bash
+# 1) 复制示例并编辑滑杆值（0..1，0.5=默认中性）
+cp character/sliders.example.json my_shape.json
+# ... 修改 face / body 下的分类值
+
+# 2) 渲染时指定 --shape-json 与 --data-dir
+blender -b --factory-startup --python pose/kp_model_render.py -- \
+    --fbx-dir /path/to/HoneySelect/Assets/Cosmetic \
+    --data-dir /path/to/HoneySelect/Assets/Data \
+    --bvh pose/samples/pirouette.bvh \
+    --shape-json my_shape.json \
+    --frames 1,150,300 --out pose/renders
+```
+
+`--shape-json` 同样适用于 `kp_trio_render.py`。分类 ID 的中文语义参考
+`character/category_names.py`。
 
 ## BVH 兼容性
 

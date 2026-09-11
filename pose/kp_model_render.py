@@ -11,7 +11,7 @@
 #   3) 显示系: body_arm 乘 R_up=RotX(90°) → 世界 Z-up(骨骼/相机语义)。
 # 用法: blender -b --factory-startup --python pose/kp_model_render.py
 #       [--fbx-dir DIR] [--bvh FILE] [--frames 1,150,...] [--out DIR]
-import bpy, os, sys, math, argparse
+import bpy, os, sys, math, argparse, json
 import numpy as np
 from mathutils import Matrix, Vector
 
@@ -22,6 +22,10 @@ ap.add_argument("--fbx-dir", default=f"{_ROOT}/HoneySelect/Assets/Cosmetic")
 ap.add_argument("--bvh", default=f"{_HERE}/samples/pirouette.bvh")
 ap.add_argument("--frames", default="1,150,300,450,592")
 ap.add_argument("--out", default=f"{_HERE}/renders")
+ap.add_argument("--shape-json", default=None,
+                help="捏人滑杆 JSON 路径(如 character/sliders.example.json); 默认中性")
+ap.add_argument("--data-dir", default=f"{_ROOT}/HoneySelect/Assets/Data",
+                help="捏人数据表目录(HoneySelect/Assets/Data)")
 argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 args = ap.parse_args(argv)
 FRAMES = [int(x) for x in args.frames.split(",")]
@@ -68,11 +72,30 @@ bpy.context.view_layer.update()
 sys.path.insert(0, _ROOT)
 sys.path.insert(0, _HERE)
 from kp_retarget import kp_drive
+from character import ShapeData, apply_morph, reset_pose, CAT_ZH
 act, n, bvh_arm = kp_drive(args.bvh, arm)
 # 回到 rest(装配 head/hair 对位基准)
 for pb in arm.pose.bones:
     pb.matrix_basis.identity()
 bpy.context.view_layer.update()
+
+# ---- 捏人数据加载 ----
+shape_sliders = {"face": {}, "body": {}}
+if args.shape_json:
+    with open(args.shape_json, encoding="utf-8") as f:
+        raw = json.load(f)
+    shape_sliders = {sec: {int(k): v for k, v in raw.get(sec, {}).items()} for sec in ("face", "body")}
+
+morph_deltas = {}
+for sec in ("face", "body"):
+    sd = ShapeData(args.data_dir, sec)
+    deltas, missing = sd.evaluate(shape_sliders[sec])
+    morph_deltas[sec] = deltas
+    print(f"[MORPH] {sec}: sliders={shape_sliders[sec]} -> {len(deltas)} bones"
+          + (f", missing={missing}" if missing else ""))
+    for cid in sorted(shape_sliders[sec]):
+        zh = CAT_ZH[sec].get(cid, "?")
+        print(f"    cat {cid} {zh}: slider={shape_sliders[sec][cid]}")
 
 # ---- rebind 组(top/bot/shoe): 换绑到 body_arm; body mesh 同套 FIX ----
 
@@ -147,7 +170,12 @@ def bbox_eval():
 
 os.makedirs(args.out, exist_ok=True)
 for f in FRAMES:
+    # 每帧先清 pose 再让动画求值，然后叠加捏人增量，避免跨帧残留
+    reset_pose(arm)
     scene.frame_set(f)
+    apply_morph(arm, morph_deltas["body"], verbose=False)
+    reset_pose(arms["head"])
+    apply_morph(arms["head"], morph_deltas["face"], verbose=False)
     bpy.context.view_layer.update()
     # 姿态帧: skin 组 mesh 与骨架同步; head/hair 刚性跟随头骨
     for p in SKIN_GROUP:

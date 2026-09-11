@@ -17,7 +17,7 @@
 #       [--fbx-dir DIR] [--bvh FILE] [--frames 1,150,...] [--out DIR] [--tmp DIR]
 # 输出: --tmp 下三栏竖幅 bar 图(fNNNN_L/M/R.png), 之后用 PIL 拼接为横幅对比图:
 #       python3 _imgcat.py <tmp> <out> "1,150,..."  →  <out>/cmp3_fNNNN.png
-import bpy, os, sys, math, argparse
+import bpy, os, sys, math, argparse, json
 import numpy as np
 from mathutils import Matrix, Vector
 
@@ -35,6 +35,10 @@ ap.add_argument("--rest", action="store_true",
                 help="仅渲染 HS2 rest 骨架(红)+模型两栏: 不导入 BVH、不模仿")
 ap.add_argument("--headshot", action="store_true",
                 help="额外渲染头部特写三视图(正脸/左/右): 检查前发装配")
+ap.add_argument("--shape-json", default=None,
+                help="捏人滑杆 JSON 路径(如 character/sliders.example.json); 默认中性")
+ap.add_argument("--data-dir", default=f"{_ROOT}/HoneySelect/Assets/Data",
+                help="捏人数据表目录(HoneySelect/Assets/Data)")
 argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 args = ap.parse_args(argv)
 FRAMES = [int(x) for x in args.frames.split(",")]
@@ -136,6 +140,7 @@ bpy.context.view_layer.update()
 sys.path.insert(0, _ROOT)
 sys.path.insert(0, _HERE)
 from kp_retarget import kp_drive
+from character import ShapeData, apply_morph, reset_pose, CAT_ZH
 bvh_arm = None
 if args.rest:
     print("[MODE] rest: 仅 HS2 rest 骨架+模型, 不导入 BVH 不模仿")
@@ -144,6 +149,24 @@ else:
 for pb in arm.pose.bones:
     pb.matrix_basis.identity()
 bpy.context.view_layer.update()
+
+# ---- 捏人数据加载 ----
+shape_sliders = {"face": {}, "body": {}}
+if args.shape_json:
+    with open(args.shape_json, encoding="utf-8") as f:
+        raw = json.load(f)
+    shape_sliders = {sec: {int(k): v for k, v in raw.get(sec, {}).items()} for sec in ("face", "body")}
+
+morph_deltas = {}
+for sec in ("face", "body"):
+    sd = ShapeData(args.data_dir, sec)
+    deltas, missing = sd.evaluate(shape_sliders[sec])
+    morph_deltas[sec] = deltas
+    print(f"[MORPH] {sec}: sliders={shape_sliders[sec]} -> {len(deltas)} bones"
+          + (f", missing={missing}" if missing else ""))
+    for cid in sorted(shape_sliders[sec]):
+        zh = CAT_ZH[sec].get(cid, "?")
+        print(f"    cat {cid} {zh}: slider={shape_sliders[sec][cid]}")
 
 # rebind 组(top/bot/shoe) → arm; 部件骨架隐藏
 for p in SKIN_GROUP:
@@ -400,7 +423,12 @@ def set_vis(show_model, show_g, show_r):
 os.makedirs(args.tmp, exist_ok=True)
 os.makedirs(args.out, exist_ok=True)
 for f in FRAMES:
+    # 每帧先清 pose 再让动画求值，然后叠加捏人增量，避免跨帧残留
+    reset_pose(arm)
     scene.frame_set(f)
+    apply_morph(arm, morph_deltas["body"], verbose=False)
+    reset_pose(arms["head"])
+    apply_morph(arms["head"], morph_deltas["face"], verbose=False)
     bpy.context.view_layer.update()
     # 模型组/骨架姿态(平移已在 arm 对象矩阵)
     for p in SKIN_GROUP:
