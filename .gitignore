@@ -15,3 +15,6 @@ render_out/
 HoneySelect/
 *.fbx
 *.tar.gz
+# 例外: pose/samples 的 Mixamo 动画样本 FBX 入库(README 引用, 供其他工程直接用);
+# 被忽略的仍是游戏角色部件 FBX(body/head/hair/top/bot/shoe)
+!pose/samples/*.fbx
